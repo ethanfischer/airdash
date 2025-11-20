@@ -23,6 +23,7 @@ type MonitorConfig struct {
 	PushoverAPIToken string  `yaml:"pushoverApiToken"`
 	PM25Threshold    float64 `yaml:"pm25Threshold"`
 	CO2Threshold     float64 `yaml:"co2Threshold"`
+	TVOCThreshold    float64 `yaml:"tvocThreshold"`
 	CheckInterval    int     `yaml:"checkInterval"` // minutes
 }
 
@@ -33,11 +34,13 @@ type AirGradientMeasures struct {
 	Atmp         float64   `yaml:"atmp"`
 	Rhum         float64   `yaml:"rhum"`
 	Rco2         float64   `yaml:"rco2"`
+	Tvoc         float64   `yaml:"tvoc"`
 	Timestamp    time.Time `yaml:"timestamp"`
 }
 
 var pm25AlertActive = false
 var co2AlertActive = false
+var tvocAlertActive = false
 
 func main() {
 	log.Println("AirDash Monitor starting...")
@@ -61,6 +64,7 @@ func main() {
 
 	log.Printf("Monitoring PM2.5 levels. Threshold: %.1f μg/m³", monConfig.PM25Threshold)
 	log.Printf("Monitoring CO2 levels. Threshold: %.0f ppm", monConfig.CO2Threshold)
+	log.Printf("Monitoring TVOC levels. Threshold: %.0f ppb", monConfig.TVOCThreshold)
 	log.Printf("Checking every %d minutes", monConfig.CheckInterval)
 
 	// Run immediately, then on interval
@@ -81,7 +85,7 @@ func checkAirQuality(agConfig *AirGradientConfig, monConfig *MonitorConfig) {
 		return
 	}
 
-	log.Printf("Current PM2.5: %.1f μg/m³, CO2: %.0f ppm", measures.Pm02, measures.Rco2)
+	log.Printf("Current PM2.5: %.1f μg/m³, CO2: %.0f ppm, TVOC: %.0f ppb", measures.Pm02, measures.Rco2, measures.Tvoc)
 
 	// Check PM2.5
 	if measures.Pm02 > monConfig.PM25Threshold && !pm25AlertActive {
@@ -90,8 +94,8 @@ func checkAirQuality(agConfig *AirGradientConfig, monConfig *MonitorConfig) {
 		sendPushoverNotification(
 			monConfig,
 			"PM2.5 Alert",
-			fmt.Sprintf("PM2.5 is elevated at %.1f μg/m³ (threshold: %.1f)\n\nCurrent readings:\n• PM2.5: %.1f μg/m³\n• CO2: %.0f ppm",
-				measures.Pm02, monConfig.PM25Threshold, measures.Pm02, measures.Rco2),
+			fmt.Sprintf("PM2.5 is elevated at %.1f μg/m³ (threshold: %.1f)\n\nCurrent readings:\n• PM2.5: %.1f μg/m³\n• CO2: %.0f ppm\n• TVOC: %.0f ppb",
+				measures.Pm02, monConfig.PM25Threshold, measures.Pm02, measures.Rco2, measures.Tvoc),
 			1, // high priority
 		)
 		log.Printf("⚠️  ALERT: PM2.5 exceeded threshold!")
@@ -101,8 +105,8 @@ func checkAirQuality(agConfig *AirGradientConfig, monConfig *MonitorConfig) {
 		sendPushoverNotification(
 			monConfig,
 			"PM2.5 Normal",
-			fmt.Sprintf("PM2.5 has returned to safe levels at %.1f μg/m³\n\nCurrent readings:\n• PM2.5: %.1f μg/m³\n• CO2: %.0f ppm",
-				measures.Pm02, measures.Pm02, measures.Rco2),
+			fmt.Sprintf("PM2.5 has returned to safe levels at %.1f μg/m³\n\nCurrent readings:\n• PM2.5: %.1f μg/m³\n• CO2: %.0f ppm\n• TVOC: %.0f ppb",
+				measures.Pm02, measures.Pm02, measures.Rco2, measures.Tvoc),
 			0, // normal priority
 		)
 		log.Printf("✓ All clear: PM2.5 back to normal")
@@ -115,8 +119,8 @@ func checkAirQuality(agConfig *AirGradientConfig, monConfig *MonitorConfig) {
 		sendPushoverNotification(
 			monConfig,
 			"CO2 Alert",
-			fmt.Sprintf("CO2 is elevated at %.0f ppm (threshold: %.0f)\n\nCurrent readings:\n• PM2.5: %.1f μg/m³\n• CO2: %.0f ppm",
-				measures.Rco2, monConfig.CO2Threshold, measures.Pm02, measures.Rco2),
+			fmt.Sprintf("CO2 is elevated at %.0f ppm (threshold: %.0f)\n\nCurrent readings:\n• PM2.5: %.1f μg/m³\n• CO2: %.0f ppm\n• TVOC: %.0f ppb",
+				measures.Rco2, monConfig.CO2Threshold, measures.Pm02, measures.Rco2, measures.Tvoc),
 			1, // high priority
 		)
 		log.Printf("⚠️  ALERT: CO2 exceeded threshold!")
@@ -126,11 +130,36 @@ func checkAirQuality(agConfig *AirGradientConfig, monConfig *MonitorConfig) {
 		sendPushoverNotification(
 			monConfig,
 			"CO2 Normal",
-			fmt.Sprintf("CO2 has returned to safe levels at %.0f ppm\n\nCurrent readings:\n• PM2.5: %.1f μg/m³\n• CO2: %.0f ppm",
-				measures.Rco2, measures.Pm02, measures.Rco2),
+			fmt.Sprintf("CO2 has returned to safe levels at %.0f ppm\n\nCurrent readings:\n• PM2.5: %.1f μg/m³\n• CO2: %.0f ppm\n• TVOC: %.0f ppb",
+				measures.Rco2, measures.Pm02, measures.Rco2, measures.Tvoc),
 			0, // normal priority
 		)
 		log.Printf("✓ All clear: CO2 back to normal")
+	}
+
+	// Check TVOC
+	if measures.Tvoc > monConfig.TVOCThreshold && !tvocAlertActive {
+		// TVOC exceeded threshold - send alert
+		tvocAlertActive = true
+		sendPushoverNotification(
+			monConfig,
+			"TVOC Alert",
+			fmt.Sprintf("TVOC is elevated at %.0f ppb (threshold: %.0f)\n\nCurrent readings:\n• PM2.5: %.1f μg/m³\n• CO2: %.0f ppm\n• TVOC: %.0f ppb",
+				measures.Tvoc, monConfig.TVOCThreshold, measures.Pm02, measures.Rco2, measures.Tvoc),
+			1, // high priority
+		)
+		log.Printf("⚠️  ALERT: TVOC exceeded threshold!")
+	} else if measures.Tvoc <= monConfig.TVOCThreshold && tvocAlertActive {
+		// TVOC back to normal - send all clear
+		tvocAlertActive = false
+		sendPushoverNotification(
+			monConfig,
+			"TVOC Normal",
+			fmt.Sprintf("TVOC has returned to safe levels at %.0f ppb\n\nCurrent readings:\n• PM2.5: %.1f μg/m³\n• CO2: %.0f ppm\n• TVOC: %.0f ppb",
+				measures.Tvoc, measures.Pm02, measures.Rco2, measures.Tvoc),
+			0, // normal priority
+		)
+		log.Printf("✓ All clear: TVOC back to normal")
 	}
 }
 
@@ -234,6 +263,9 @@ func loadMonitorConfig(path string) (*MonitorConfig, error) {
 	}
 	if config.CO2Threshold == 0 {
 		config.CO2Threshold = 750
+	}
+	if config.TVOCThreshold == 0 {
+		config.TVOCThreshold = 250
 	}
 	if config.CheckInterval == 0 {
 		config.CheckInterval = 5
