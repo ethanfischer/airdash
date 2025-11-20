@@ -73,10 +73,15 @@ func main() {
 			}
 			logger.Debug("AirGradientMeasures", "measures", airGradientMeasures)
 
+			// convert the temperature to the desired unit
+			temperature := convertTemperature(airGradientMeasures.Atmp, cfg.TempUnit)
+
 			// updates to the ui should happen on the main thread to avoid segfaults
 			dispatch.MainQueue().DispatchAsync(func() {
-				item.Button().SetTitle(fmt.Sprintf("💨 %.0f  🫧 %.0f",
+				item.Button().SetTitle(fmt.Sprintf("🌡️ %.2f  💨 %.0f  💧 %.1f  🫧 %.0f",
+					temperature,
 					airGradientMeasures.Pm02,
+					airGradientMeasures.Rhum,
 					airGradientMeasures.Rco2,
 				))
 			})
