@@ -19,12 +19,14 @@ type AirGradientConfig struct {
 }
 
 type MonitorConfig struct {
-	PushoverUserKey  string  `yaml:"pushoverUserKey"`
-	PushoverAPIToken string  `yaml:"pushoverApiToken"`
-	PM25Threshold    float64 `yaml:"pm25Threshold"`
-	CO2Threshold     float64 `yaml:"co2Threshold"`
-	TVOCThreshold    float64 `yaml:"tvocThreshold"`
-	CheckInterval    int     `yaml:"checkInterval"` // minutes
+	PushoverUserKey      string  `yaml:"pushoverUserKey"`
+	PushoverAPIToken     string  `yaml:"pushoverApiToken"`
+	PM25ThresholdWarning float64 `yaml:"pm25ThresholdWarning"`
+	PM25ThresholdUrgent  float64 `yaml:"pm25ThresholdUrgent"`
+	PM25ThresholdEmergency float64 `yaml:"pm25ThresholdEmergency"`
+	CO2Threshold         float64 `yaml:"co2Threshold"`
+	TVOCThreshold        float64 `yaml:"tvocThreshold"`
+	CheckInterval        int     `yaml:"checkInterval"` // minutes
 }
 
 type AirGradientMeasures struct {
@@ -38,7 +40,7 @@ type AirGradientMeasures struct {
 	Timestamp    time.Time `yaml:"timestamp"`
 }
 
-var pm25AlertActive = false
+var pm25AlertLevel = "" // "", "warning", "urgent", "emergency"
 var co2AlertActive = false
 var tvocAlertActive = false
 
@@ -62,7 +64,8 @@ func main() {
 		log.Fatal("Failed to load monitor config:", err)
 	}
 
-	log.Printf("Monitoring PM2.5 levels. Threshold: %.1f μg/m³", monConfig.PM25Threshold)
+	log.Printf("Monitoring PM2.5 levels - Warning: %.1f, Urgent: %.1f, Emergency: %.1f μg/m³",
+		monConfig.PM25ThresholdWarning, monConfig.PM25ThresholdUrgent, monConfig.PM25ThresholdEmergency)
 	log.Printf("Monitoring CO2 levels. Threshold: %.0f ppm", monConfig.CO2Threshold)
 	log.Printf("Monitoring TVOC levels. Threshold: %.0f ppb", monConfig.TVOCThreshold)
 	log.Printf("Checking every %d minutes", monConfig.CheckInterval)
@@ -87,29 +90,59 @@ func checkAirQuality(agConfig *AirGradientConfig, monConfig *MonitorConfig) {
 
 	log.Printf("Current PM2.5: %.1f μg/m³, CO2: %.0f ppm, TVOC: %.0f ppb", measures.Pm02, measures.Rco2, measures.Tvoc)
 
-	// Check PM2.5
-	if measures.Pm02 > monConfig.PM25Threshold && !pm25AlertActive {
-		// PM2.5 exceeded threshold - send alert
-		pm25AlertActive = true
-		sendPushoverNotification(
-			monConfig,
-			"PM2.5 Alert",
-			fmt.Sprintf("PM2.5 is elevated at %.1f μg/m³ (threshold: %.1f)\n\nCurrent readings:\n• PM2.5: %.1f μg/m³\n• CO2: %.0f ppm\n• TVOC: %.0f ppb",
-				measures.Pm02, monConfig.PM25Threshold, measures.Pm02, measures.Rco2, measures.Tvoc),
-			1, // high priority
-		)
-		log.Printf("⚠️  ALERT: PM2.5 exceeded threshold!")
-	} else if measures.Pm02 <= monConfig.PM25Threshold && pm25AlertActive {
-		// PM2.5 back to normal - send all clear
-		pm25AlertActive = false
-		sendPushoverNotification(
-			monConfig,
-			"PM2.5 Normal",
-			fmt.Sprintf("PM2.5 has returned to safe levels at %.1f μg/m³\n\nCurrent readings:\n• PM2.5: %.1f μg/m³\n• CO2: %.0f ppm\n• TVOC: %.0f ppb",
-				measures.Pm02, measures.Pm02, measures.Rco2, measures.Tvoc),
-			0, // normal priority
-		)
-		log.Printf("✓ All clear: PM2.5 back to normal")
+	// Check PM2.5 with tiered alerts
+	var newPM25Level string
+	if measures.Pm02 >= monConfig.PM25ThresholdEmergency {
+		newPM25Level = "emergency"
+	} else if measures.Pm02 >= monConfig.PM25ThresholdUrgent {
+		newPM25Level = "urgent"
+	} else if measures.Pm02 >= monConfig.PM25ThresholdWarning {
+		newPM25Level = "warning"
+	} else {
+		newPM25Level = ""
+	}
+
+	// Only send alert if level changed
+	if newPM25Level != pm25AlertLevel {
+		if newPM25Level == "emergency" {
+			sendPushoverNotification(
+				monConfig,
+				"🚨 PM2.5 EMERGENCY",
+				fmt.Sprintf("PM2.5 has reached EMERGENCY levels at %.1f μg/m³\n\nCurrent readings:\n• PM2.5: %.1f μg/m³\n• CO2: %.0f ppm\n• TVOC: %.0f ppb",
+					measures.Pm02, measures.Pm02, measures.Rco2, measures.Tvoc),
+				2, // emergency priority
+			)
+			log.Printf("🚨 EMERGENCY: PM2.5 at critical levels!")
+		} else if newPM25Level == "urgent" {
+			sendPushoverNotification(
+				monConfig,
+				"⚠️ PM2.5 URGENT",
+				fmt.Sprintf("PM2.5 is at URGENT levels at %.1f μg/m³\n\nCurrent readings:\n• PM2.5: %.1f μg/m³\n• CO2: %.0f ppm\n• TVOC: %.0f ppb",
+					measures.Pm02, measures.Pm02, measures.Rco2, measures.Tvoc),
+				1, // high priority
+			)
+			log.Printf("⚠️  URGENT: PM2.5 at elevated levels!")
+		} else if newPM25Level == "warning" {
+			sendPushoverNotification(
+				monConfig,
+				"⚡ PM2.5 Warning",
+				fmt.Sprintf("PM2.5 has exceeded warning threshold at %.1f μg/m³\n\nCurrent readings:\n• PM2.5: %.1f μg/m³\n• CO2: %.0f ppm\n• TVOC: %.0f ppb",
+					measures.Pm02, measures.Pm02, measures.Rco2, measures.Tvoc),
+				1, // high priority
+			)
+			log.Printf("⚡ WARNING: PM2.5 above warning threshold!")
+		} else if pm25AlertLevel != "" {
+			// Was in alert, now back to normal
+			sendPushoverNotification(
+				monConfig,
+				"✓ PM2.5 Normal",
+				fmt.Sprintf("PM2.5 has returned to safe levels at %.1f μg/m³\n\nCurrent readings:\n• PM2.5: %.1f μg/m³\n• CO2: %.0f ppm\n• TVOC: %.0f ppb",
+					measures.Pm02, measures.Pm02, measures.Rco2, measures.Tvoc),
+				0, // normal priority
+			)
+			log.Printf("✓ All clear: PM2.5 back to normal")
+		}
+		pm25AlertLevel = newPM25Level
 	}
 
 	// Check CO2
@@ -216,6 +249,14 @@ func sendPushoverNotification(config *MonitorConfig, title, message string, prio
 	data.Set("message", message)
 	data.Set("priority", fmt.Sprintf("%d", priority))
 
+	// Emergency priority (2) requires retry and expire parameters
+	// Notification will repeat every 60 seconds for up to 1 hour until acknowledged
+	if priority == 2 {
+		data.Set("retry", "60")    // Retry every 60 seconds
+		data.Set("expire", "3600") // Stop retrying after 1 hour
+		data.Set("sound", "siren") // Use siren sound for emergency
+	}
+
 	resp, err := http.PostForm("https://api.pushover.net/1/messages.json", data)
 	if err != nil {
 		log.Printf("Failed to send notification: %v", err)
@@ -258,8 +299,14 @@ func loadMonitorConfig(path string) (*MonitorConfig, error) {
 	}
 
 	// Set defaults
-	if config.PM25Threshold == 0 {
-		config.PM25Threshold = 10
+	if config.PM25ThresholdWarning == 0 {
+		config.PM25ThresholdWarning = 12
+	}
+	if config.PM25ThresholdUrgent == 0 {
+		config.PM25ThresholdUrgent = 35
+	}
+	if config.PM25ThresholdEmergency == 0 {
+		config.PM25ThresholdEmergency = 55
 	}
 	if config.CO2Threshold == 0 {
 		config.CO2Threshold = 750
