@@ -259,3 +259,112 @@ tail -f /tmp/airdash-monitor.error.log
 cd /Users/work/Repos/airdash/airdash-monitor
 go test -v
 ```
+
+## Troubleshooting
+
+### Multi-User Systems: Log File Conflicts
+
+**Problem:** On systems with multiple users, LaunchAgents may fail with exit code 78 if log files in `/tmp/` are owned by a different user.
+
+**Symptoms:**
+- `launchctl list | grep airdash` shows `-` for PID and exit code `78`
+- Services work when run directly from terminal but fail via launchctl
+- Log files in `/tmp/` owned by another user (check with `ls -la /tmp/airdash*.log`)
+
+**Solution:** Use user-specific log file names in your plist files:
+
+```xml
+<key>StandardOutPath</key>
+<string>/tmp/airdash-USERNAME.log</string>
+<key>StandardErrorPath</key>
+<string>/tmp/airdash-USERNAME.error.log</string>
+```
+
+### Menu Bar App (GUI) Requirements
+
+The menu bar app requires access to the macOS GUI session. Add `LimitLoadToSessionType` to ensure it only runs in graphical sessions:
+
+```xml
+<key>LimitLoadToSessionType</key>
+<string>Aqua</string>
+```
+
+### Complete Working Plist Examples
+
+**com.airdash.plist (Menu Bar App):**
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.airdash</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/USERNAME/Repos/airdash/airdash</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>LimitLoadToSessionType</key>
+    <string>Aqua</string>
+    <key>StandardOutPath</key>
+    <string>/tmp/airdash-USERNAME.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/airdash-USERNAME.error.log</string>
+</dict>
+</plist>
+```
+
+**com.airdash.monitor.plist (Background Service):**
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.airdash.monitor</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/USERNAME/Repos/airdash/airdash-monitor/airdash-monitor</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/airdash-monitor-USERNAME.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/airdash-monitor-USERNAME.error.log</string>
+</dict>
+</plist>
+```
+
+### Verifying Services Are Running
+
+```bash
+# Check launchctl status (should show PID and exit code 0)
+launchctl list | grep airdash
+
+# Example of healthy output:
+# 7351    0    com.airdash
+# 7352    0    com.airdash.monitor
+
+# Example of failed output (exit code 78, no PID):
+# -    78    com.airdash
+
+# Check running processes
+ps aux | grep airdash | grep -v grep
+
+# Check logs for errors
+tail -f /tmp/airdash-USERNAME.error.log
+tail -f /tmp/airdash-monitor-USERNAME.error.log
+```
+
+### Validate Plist Syntax
+
+```bash
+plutil -lint ~/Library/LaunchAgents/com.airdash.plist
+plutil -lint ~/Library/LaunchAgents/com.airdash.monitor.plist
+```
